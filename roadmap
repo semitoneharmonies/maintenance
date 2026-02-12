@@ -1,0 +1,442 @@
+Roadmap: Landscaping Maintenance App
+Phase 0 — Project Setup and “No Backtracking” Foundations
+
+Goal: Create a skeleton where later work plugs in cleanly.
+
+Session 0.1 — Repo + tooling scaffolding
+
+Monorepo folders (backend, frontend)
+
+Shared .env.example files
+
+Backend:
+
+Express app skeleton
+
+Central config loader + env validation
+
+Central error handler + request logging
+
+Frontend:
+
+Vite + React
+
+Routing + layout shell
+
+Mobile-first base components
+
+Why this prevents later edits: all future code lands in well-defined module folders.
+
+Session 0.2 — Database + migrations framework
+
+Postgres connection layer
+
+Migration tool (e.g., knex or drizzle migrations)
+
+Seed: only for dev
+
+Health endpoint checks DB connectivity
+
+Lock-in decisions here: DB conventions, UUIDs, timestamps (UTC), soft-delete patterns.
+
+Phase 1 — Canonical Data Model + Permissions (Build Once)
+
+Goal: Define the schema and access control so we never redesign later.
+
+Session 1.1 — Migrations for all core tables (complete schema up-front)
+
+Create migrations for:
+
+users (manager/admin/crew_lead)
+
+workers
+
+crews
+
+crew_memberships (effective dating)
+
+crew_lead_assignments
+
+sites (includes crew-visible access notes)
+
+site_contacts
+
+schedule_assignments
+
+visit_reports
+
+report_photos (metadata only)
+
+email_drafts
+
+schedule_access_pin (single global PIN, hashed)
+
+audit_log (optional but smart)
+
+Why this prevents backtracking: we include the full end-state schema now, even if we don’t expose all screens yet.
+
+Session 1.2 — Auth + RBAC + route guards
+
+Login/logout/me
+
+Password hashing
+
+Role middleware (requireRole, requireCrewLead, etc.)
+
+“Public schedule token” middleware for PIN access:
+
+POST /api/pin/verify returns short-lived JWT
+
+Policy layer:
+
+Crew public token can only hit public schedule endpoints
+
+Crew leads can only report against assignments for crews they lead
+
+No-backtracking design: implement permission checks as reusable policy functions now.
+
+Phase 2 — Scheduling API (No UI Yet)
+
+Goal: Make schedule data solid before drag/drop UI.
+
+Session 2.1 — Schedule read endpoints (public + crew lead + manager)
+
+GET /api/public/schedule (PIN token)
+
+GET /api/lead/schedule
+
+GET /api/admin/schedule
+
+Includes:
+
+address + crew_visible_access_notes
+
+crew roster for that day (resolved from memberships)
+
+assignment ordering
+
+Session 2.2 — Schedule write endpoints (manager/admin)
+
+create assignment
+
+edit assignment
+
+delete assignment (soft delete recommended)
+
+reorder within day
+
+move between day/crew
+
+No-backtracking trick: define a single “ScheduleService” that both API and later UI depend on.
+
+Phase 3 — Public Schedule UI + PIN Gate (Crew Usability First)
+
+Goal: Ship something crews can use early, with minimal risk.
+
+Session 3.1 — PIN gate + token storage
+
+PIN entry screen
+
+Store scheduleView JWT securely (httpOnly cookie if possible; otherwise in memory + refresh)
+
+Lock screen timeout / re-enter PIN after X hours
+
+Session 3.2 — Public Schedule viewer (mobile-first)
+
+Today + Week toggle
+
+Crew selector (if needed)
+
+Assignment cards show:
+
+site/job label
+
+address
+
+access notes (gate/parking)
+
+crew list
+
+time window
+
+manager public note
+
+No backtracking: component architecture built for reuse by crew lead schedule later.
+
+Phase 4 — Crew Lead Reporting + Timer (Core Value)
+
+Goal: Enable reports + photos + man-hours, tied to schedule assignments.
+
+Session 4.1 — Crew lead login UI + schedule view reuse
+
+Crew lead login screen
+
+Same schedule UI as crew, but cards have “Open job”
+
+Session 4.2 — Timer endpoints + reliable state
+
+Backend:
+
+POST /lead/assignments/:id/timer/start
+
+POST /lead/assignments/:id/timer/stop
+Rules:
+
+Only one active timer per crew lead (optional)
+
+Prevent double-start
+
+Store start/end events
+
+Frontend:
+
+Start/Stop button
+
+Offline-safe queue (optional in MVP; add in Phase 9 if needed)
+
+Session 4.3 — Report submission + man-hours calculation
+
+Backend:
+
+Create report for assignment
+
+Store:
+
+work_performed, WIP, issues
+
+started_at, ended_at, duration
+
+worker_count_at_visit (snapshotted)
+
+total_man_minutes (snapshotted)
+Logic:
+
+worker_count = crew roster count for that assignment date (membership resolved)
+
+man_minutes = duration_minutes * worker_count
+
+Frontend:
+
+Report form
+
+Submit report
+
+Basic validation + autosave draft locally (optional)
+
+No backtracking: store snapshot fields so later membership changes don’t alter historical man-hours.
+
+Phase 5 — Photo Upload + 14-Day Auto Deletion
+
+Goal: Photos work reliably and don’t bloat your system.
+
+Session 5.1 — Object storage integration (S3-compatible)
+
+Backend:
+
+presigned upload endpoint
+
+confirm endpoint writes metadata
+
+store expires_at = uploaded_at + 14 days
+
+Infra:
+
+Bucket lifecycle rule deletes after 14 days
+
+Frontend:
+
+multi-photo upload
+
+progress indicator
+
+retry on failure
+
+No backtracking: photos are abstracted behind StorageService so changing providers later doesn’t touch business logic.
+
+Phase 6 — Manager Console MVP (Manage Without Chaos)
+
+Goal: Give you control surfaces that everything else depends on.
+
+Session 6.1 — Manager dashboard (read-only first)
+
+Today’s schedule
+
+Reports submitted today
+
+Missing reports list (assignments where requires_report = true and no report by end of day)
+
+Session 6.2 — Crews + Workers management UI
+
+CRUD workers
+
+CRUD crews
+
+assign workers to crews (with effective dates)
+
+assign crew leads to crews
+
+Session 6.3 — Sites master list UI (manager/admin only)
+
+CRUD sites
+
+edit crew-visible access notes
+
+edit manager-private notes
+
+CRUD site contacts (admin/manager only)
+
+contract fields (admin/manager only)
+
+No backtracking: master list is separate from what crews see; crews only see “assignment view model”.
+
+Phase 7 — Drag-and-Drop Schedule Builder (Manager Only)
+
+Goal: The flagship scheduling tool, built on already-solid APIs.
+
+Session 7.1 — Weekly grid UI
+
+Rows = crews
+
+Columns = days
+
+Cards = assignments
+
+Session 7.2 — Drag/drop reorder + move
+
+Reorder within crew/day
+
+Drag to other day
+
+Drag to other crew
+
+Optimistic UI updates + rollback on failure
+
+Session 7.3 — Assignment editor drawer
+
+time window
+
+public note
+
+private note
+
+requires_report toggle
+
+job label override
+
+No backtracking: we already built schedule write endpoints in Phase 2, so UI is “just a client.”
+
+Phase 8 — AI Email Drafting + Manager Approval + Sending
+
+Goal: Professional client comms with zero automatic sending.
+
+Session 8.1 — Template system (editable by manager)
+
+Backend:
+
+email_templates table (or a simple “settings” table)
+
+Default template: subject + body instructions + tone
+
+Manager can edit templates from UI
+
+Session 8.2 — Generate AI draft from report
+
+Backend:
+
+/admin/reports/:id/email-draft/generate
+
+Strict prompt: rewrite only, no invention
+
+Includes placeholders for photos list
+
+Creates email_drafts record
+
+Session 8.3 — Manager edit + approve/send UI
+
+Draft editor (subject + body)
+
+Shows report content and photos side-by-side
+
+Manager can edit the underlying report text (per your requirement) before generating/sending
+
+Send email (provider integration)
+
+Log sent status + recipients
+
+No backtracking: AI behavior controlled via templates/settings, not hard-coded prompts.
+
+Phase 9 — Hardening for Field Reality (Offline, Reliability, Audit)
+
+Goal: Make it survive real crews and bad signal.
+
+Session 9.1 — PWA enhancements
+
+Add to home screen
+
+Offline cache for schedule
+
+Background sync for report drafts / queued uploads (where feasible)
+
+Session 9.2 — Audit log + change history
+
+Log schedule edits, report edits, email sends, PIN rotations
+
+Manager can see “who changed what”
+
+Session 9.3 — Operational safeguards
+
+Rate limits (PIN attempts, login)
+
+Image upload limits and compression
+
+Backups strategy for DB
+
+Phase 10 — Reporting, Search, and Ops Intelligence
+
+Goal: Turn data into management power.
+
+Man-hours per site/week/month
+
+Time on site trends
+
+Report completeness
+
+Export CSV/PDF
+
+Search reports by site/date/crew/keyword
+
+Build Order Summary (minimal backtracking)
+
+Full schema + permissions (done once)
+
+Schedule APIs (done once)
+
+Crew schedule UI + PIN
+
+Crew lead reporting + timer + man-hours snapshot
+
+Photos + lifecycle deletion
+
+Manager CRUD (sites/crews/workers)
+
+Drag/drop schedule builder
+
+AI drafts + manager approval + email send
+
+Hardening (offline, audit, rate limits)
+
+Analytics/reporting
+
+Key “Anti-Backtracking” Design Choices
+
+Full end-state DB schema early (even if UI comes later)
+
+Central policy layer for permissions
+
+Services: ScheduleService, StorageService, EmailService, AiDraftService
+
+Snapshot worker_count_at_visit and total_man_minutes in reports (so historical numbers don’t change)
+
+AI prompts stored in DB templates/settings (so you change behavior without code edits)
+
+Schedule is the only entry point for reports (no site browsing
